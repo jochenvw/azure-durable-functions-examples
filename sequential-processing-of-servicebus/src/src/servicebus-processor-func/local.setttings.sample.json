@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+    "OrchestrationStatePollingInterval": 50,
+    "InjectRandomErrors": true,
+    "TaskExecutionDurationInMs": 430,
+    "ServiceBusConnectionIn": "Your service bus connection string - ensure 'read' permissions on the queue",
+    "ServiceBusQueueToListenTo": "inbox",
+    "ServiceBusConnectionOut": "Your service bus connection string - ensure 'write' permissions on the queue",
+    "ServiceBusQueueToWriteTo": "outbox"
+  }
+}

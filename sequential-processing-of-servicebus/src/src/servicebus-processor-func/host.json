@@ -1,0 +1,20 @@
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "Host.Triggers.DurableTask": "Information"
+    }
+  },
+  "extensions": {
+    "durableTask": {
+      "extendedSessionsEnabled": true,
+      "extendedSessionIdleTimeoutInSeconds": 30,
+      "maxConcurrentOrchestratorFunctions": 1
+    },
+    "serviceBus": {
+      "prefetchCount": 1,
+      "autoCompleteMessages": true,
+      "maxAutoLockRenewalDuration": "00:05:00"
+    }
+  }
+}
