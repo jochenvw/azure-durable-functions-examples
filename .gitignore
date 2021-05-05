@@ -264,3 +264,5 @@ __pycache__/
 *.pyc
 src/servicebus-logger/appsettings.json
 src/servicebus-loader/appsettings.json
+sequential-processing-of-servicebus/src/servicebus-loader/appsettings.json
+sequential-processing-of-servicebus/src/servicebus-logger/appsettings.json
