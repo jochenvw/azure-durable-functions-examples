@@ -1,0 +1,24 @@
+#!/bin/bash
+
+
+# Resource name parts
+prefix=ms-csu-nl-jvw
+project=filetrnsfrm
+postfix=dev
+
+
+inblobstoreendpoint=$(az resource show --resource-group "${prefix}-${project}-${postfix}"  --name  "${project}datain${postfix}" --resource-type Microsoft.storage/storageAccounts --query properties.primaryEndpoints.blob --output tsv)
+outblobstoreendpoint=$(az resource show --resource-group "${prefix}-${project}-${postfix}"  --name  "${project}dataout${postfix}" --resource-type Microsoft.storage/storageAccounts --query properties.primaryEndpoints.blob --output tsv)
+
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageAccount=${inblobstoreendpoint}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageContainerName=${inboxcontainer}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageFileName=test.csv"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "SQLDBConnectionString=Server=tcp:${project}-dbsrv-${postfix}.database.windows.net,1433;Database=${project}-db-${postfix}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "WEBSITE_RUN_FROM_PACKAGE=1"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "APIEndpoint=https://f461dda3669938d8ace1a78ebe8bf94d.m.pipedream.net"
+# NumberOfLinesInBatch findings: 1K works fine - 10K seemed a bit too much, resulting in SQL timeouts. Therefore
+# Therefore I've made the SQL DB Command timeout configurable - and now at 120 seconds ( default @ 30 ). Problem is - if you 
+# have chunks that exceed the timeout, the function cannot recover from this. Because retries will also exceeed etc.
+# I don't want to be pushing that limit and would like to stay within 15-30 seconds SQL execution time. So now checking with 2.5K batch size.
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "NumberOfLinesInBatch=2500"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "SQLDBCommandTimeout=120"

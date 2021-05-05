@@ -1,0 +1,107 @@
+trigger:
+- master
+
+stages:
+- stage: Build
+  displayName: Build and package solution binaries and other files
+
+# 
+# Build stage
+#
+
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - task: CopyFiles@2
+      displayName: "Copy Azure CLI deployment files to artifact staging folder"
+      inputs:
+        SourceFolder: 'infra'
+        Contents: '**'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/infra'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build function app files into the publish_output folder with Release config'
+      inputs:
+        command: 'build'
+        projects: |
+          $(System.DefaultWorkingDirectory)/app/TransformationFunctions/*.csproj
+        arguments: --output $(System.DefaultWorkingDirectory)/app/TransformationFunctions/publish_output --configuration Release
+
+    - task: ArchiveFiles@2
+      displayName: 'Zip up function build output - that can be used for ZIP deployment'
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)/app/TransformationFunctions/publish_output'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/app/file-transform-$(Build.BuildId).zip
+        replaceExistingArchive: true
+
+    - task: Bash@3
+      displayName: "Rename .azcli file to .sh file so it can be by Azure CLI Step"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cp deploy-infra-dev.azcli deploy-infra-dev.sh
+          cp deploy-infra-prod.azcli deploy-infra-prod.sh
+        workingDirectory: '$(Build.ArtifactStagingDirectory)/infra'        
+
+    - publish: $(Build.ArtifactStagingDirectory)
+      displayName: 'Publish contents of $(Build.ArtifactStagingDirectory) to artifact repo in Azure DevOps'
+      artifact: drop
+
+
+# 
+# Deploy to DEV
+#
+
+- stage: DeployDEV
+  displayName: Deploy to DEV
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy to DEV
+    environment: 'development'
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:            
+          - task: AzureCLI@2
+            displayName: "Deploy .azcli deployment script"
+            inputs:
+              azureSubscription: '$(azure-subscription)'
+              scriptType: 'bash'
+              scriptLocation: 'scriptPath'
+              scriptPath: $(Agent.BuildDirectory)/drop/infra/deploy-infra-dev.sh
+
+# 
+# Deploy to PROD
+#
+
+- stage: DeployPROD
+  displayName: Deploy to PROD
+  dependsOn: DeployDEV
+  condition: succeeded()
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: 'production'
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:            
+          - task: AzureCLI@2
+            displayName: "Deploy .azcli deployment script"
+            inputs:
+              azureSubscription: '$(azure-subscription)'
+              scriptType: 'bash'
+              scriptLocation: 'scriptPath'
+              scriptPath: $(Agent.BuildDirectory)/drop/infra/deploy-infra-prod.sh

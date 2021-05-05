@@ -1,0 +1,123 @@
+#!/bin/bash
+
+# Makes the CLI auto install extensions required by the script
+az config set extension.use_dynamic_install=yes_without_prompt
+
+# Deploys Azure Resources for file-transformation function-app
+
+# Resource name parts
+prefix=ms-csu-nl-jvw
+project=filetrnsfrm
+postfix=dev
+
+# Deploy foundation: resource group
+az group create --name "${prefix}-${project}-${postfix}" --location westeurope
+
+
+# Virtual network with /16 - so lots of space and a /24 for the Azure Function
+
+# Challenge here is that the az cli commands for VNET creation do *not* include subnet information
+# therefore - the 2nd time this command runs - it will try to delete the subnets to create them later again.
+# This will fail, as the subnets will be in use by that time.
+# Reported this UX issue here: https://github.com/Azure/azure-cli/issues/15892 
+# Current workaround: do not deploy VNET if VNET already exists.
+vnetInfo=$(az network vnet show --resource-group "${prefix}-${project}-${postfix}" --name "${project}-vnet-${postfix}")
+
+[ -z "$vnetInfo" ] && echo "VNET does not yet exist - creating ..." || echo "VNET already exist - skipping creation !"
+[ -z "$vnetInfo" ] && az network vnet create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}-vnet-${postfix}" --address-prefixes 10.0.0.0/16
+[ -z "$vnetInfo" ] && az network vnet subnet create --resource-group "${prefix}-${project}-${postfix}" --vnet-name ${project}-vnet-${postfix} --name TransformationAppSubnet --address-prefixes 10.0.1.0/24 --delegations Microsoft.Web/serverFarms
+[ -z "$vnetInfo" ] && az network vnet subnet create --resource-group "${prefix}-${project}-${postfix}" --vnet-name ${project}-vnet-${postfix} --name DataServicesSubnet --address-prefixes 10.0.2.0/24 --disable-private-endpoint-network-policies true
+# Bash wizardry: https://www.cyberciti.biz/faq/unix-linux-bash-script-check-if-variable-is-empty/ 
+
+# Instrumentation - Log Analytics and App Insights
+# NOTE the relative new feature to keep Log Analytics and App Insights logs in the same workspace
+az monitor log-analytics workspace create --resource-group "${prefix}-${project}-${postfix}" --workspace-name "${project}-logs-${postfix}"
+az monitor app-insights component create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --app "${project}-appinsights-${postfix}" --kind web --workspace "${project}-logs-${postfix}"
+
+
+# Function app - using Linux since we're doing .NET core anyway
+az appservice plan create --resource-group "${prefix}-${project}-${postfix}" --name "${project}-asp-${postfix}" --is-linux --sku P1V3 
+az storage account create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}funcstore${postfix}" --sku Standard_LRS
+az functionapp create --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --storage-account "${project}funcstore${postfix}" --plan "${project}-asp-${postfix}" --app-insights "${project}-appinsights-${postfix}" --functions-version 3 --assign-identity --runtime dotnet 
+
+# Configure the Azure function to:
+# 1. Integrate with the virtual network: https://docs.microsoft.com/en-us/azure/azure-functions/functions-networking-options
+# 2. Ensure *ALL* outbound traffic flows into the VNET - because this is not the case by default: https://docs.microsoft.com/en-us/azure/app-service/web-sites-integrate-with-vnet#regional-vnet-integration
+az functionapp vnet-integration add --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --vnet "${project}-vnet-${postfix}" --subnet TransformationAppSubnet
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "WEBSITE_VNET_ROUTE_ALL=1"
+
+# Deploy the NAT gateway and configure the subnet to route its traffic through the NAT gateway
+az network public-ip create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}-natpip-${postfix}" --allocation-method static --sku Standard
+az network nat gateway create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}-natgw-${postfix}" --public-ip-addresses "${project}-natpip-${postfix}"
+az network vnet subnet update -n TransformationAppSubnet --vnet-name  "${project}-vnet-${postfix}" --resource-group "${prefix}-${project}-${postfix}" --nat-gateway "${project}-natgw-${postfix}"
+
+# Storage container creation for in- and outbound data
+az storage account create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}datain${postfix}" --sku Standard_ZRS --encryption-services blob #--https-only true --min-tls-version TLS1_2 
+az storage account create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}dataout${postfix}" --sku Standard_ZRS --encryption-services blob #--https-only true --min-tls-version TLS1_2 
+
+# Container creation within the storage account - requires the following procedure
+# https://docs.microsoft.com/en-us/azure/storage/blobs/storage-quickstart-blobs-cli 
+
+# DATA IN storage container
+# 1 - Make the current deployment principle "Storage Account Contributor" within the storage account
+inboxcontainer=inbox
+storageaccountid=$(az resource show --resource-group "${prefix}-${project}-${postfix}" --resource-type Microsoft.Storage/storageAccounts --name "${project}datain${postfix}" --query id --output tsv | tr -d '\r')
+spobjectid=$(az ad signed-in-user show --query objectId --output tsv | tr -d '\r')
+
+# To find the GUIDs - run: az role definition list - but does not seem to be needed
+az role assignment create --role "Storage Account Contributor" --assignee $spobjectid --scope $storageaccountid
+
+# 2- Create the container
+az storage container create --account-name "${project}datain${postfix}" --auth-mode login --name ${inboxcontainer} --public-access off 
+# 3 - Give the Azure function reader rights on the container - for container scope: https://docs.microsoft.com/en-us/azure/storage/common/storage-auth-aad-rbac-cli
+functionappidentity=$(az resource show --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --resource-type Microsoft.Web/sites --query identity.principalId --output tsv | tr -d '\r')
+az role assignment create --role "Storage Blob Data Reader" --assignee "${functionappidentity}" --scope "${storageaccountid}/blobServices/default/containers/${inboxcontainer}"
+
+# DATA OUT storage container
+reportscontainer=reports
+storageaccountid=$(az resource show --resource-group "${prefix}-${project}-${postfix}" --resource-type Microsoft.Storage/storageAccounts --name "${project}dataout${postfix}" --query id --output tsv  | tr -d '\r')
+az role assignment create --role "Storage Blob Data Contributor" --assignee "${spobjectid}" --scope "${storageaccountid}"
+az storage container create  --account-name "${project}dataout${postfix}" --auth-mode login --name ${reportscontainer} --public-access off 
+az role assignment create --role "Storage Blob Data Contributor" --assignee "${functionappidentity}" --scope "${storageaccountid}/blobServices/default/containers/${reportscontainer}"
+
+# Database server + DB
+az sql server create --resource-group "${prefix}-${project}-${postfix}" --location westeurope --name "${project}-dbsrv-${postfix}" --admin-user sqldbadmin --admin-password !SuperSecretP@ssword --minimal-tls-version 1.2
+az sql db create --resource-group "${prefix}-${project}-${postfix}" --name "${project}-db-${postfix}" --server "${project}-dbsrv-${postfix}" --compute-model serverless -e GeneralPurpose -f Gen5 -c 1
+
+inblobstoreendpoint=$(az resource show --resource-group "${prefix}-${project}-${postfix}"  --name  "${project}datain${postfix}" --resource-type Microsoft.storage/storageAccounts --query properties.primaryEndpoints.blob --output tsv)
+outblobstoreendpoint=$(az resource show --resource-group "${prefix}-${project}-${postfix}"  --name  "${project}dataout${postfix}" --resource-type Microsoft.storage/storageAccounts --query properties.primaryEndpoints.blob --output tsv)
+
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageAccount=${inblobstoreendpoint}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageContainerName=${inboxcontainer}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "DataInStorageFileName=test.csv"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "SQLDBConnectionString=Server=tcp:${project}-dbsrv-${postfix}.database.windows.net,1433;Database=${project}-db-${postfix}"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "WEBSITE_RUN_FROM_PACKAGE=1"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "APIEndpoint=https://f461dda3669938d8ace1a78ebe8bf94d.m.pipedream.net"
+# NumberOfLinesInBatch findings: 1K works fine - 10K seemed a bit too much, resulting in SQL timeouts. Therefore
+# Therefore I've made the SQL DB Command timeout configurable - and now at 120 seconds ( default @ 30 ). Problem is - if you 
+# have chunks that exceed the timeout, the function cannot recover from this. Because retries will also exceeed etc.
+# I don't want to be pushing that limit and would like to stay within 15-30 seconds SQL execution time. So now checking with 2.5K batch size.
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "NumberOfLinesInBatch=2500"
+az functionapp config appsettings set --resource-group "${prefix}-${project}-${postfix}" --name "${project}-func-${postfix}" --settings "SQLDBCommandTimeout=120"
+
+
+# Send all logs and metrics to log analytics for all resources where possible
+az monitor diagnostic-settings create --resource-group "${prefix}-${project}-${postfix}" --name SendToLogAnalytics --resource "${project}-func-${postfix}" --resource-type Microsoft.Web/sites --logs '[{"category":"FunctionAppLogs","Enabled":true}]' --metrics '[{"category":"AllMetrics","Enabled":true}]' --workspace "${project}-logs-${postfix}"
+az monitor diagnostic-settings create --resource-group "${prefix}-${project}-${postfix}" --name SendToLogAnalytics --resource "${project}-asp-${postfix}" --resource-type Microsoft.Web/serverfarms --metrics '[{"category":"AllMetrics","Enabled":true}]' --workspace "${project}-logs-${postfix}"
+az monitor diagnostic-settings create --resource-group "${prefix}-${project}-${postfix}" --name SendToLogAnalytics --resource "${project}-vnet-${postfix}" --resource-type Microsoft.Network/virtualNetworks --logs '[{"category":"VMProtectionAlerts","Enabled":true}]' --metrics '[{"category":"AllMetrics","Enabled":true}]' --workspace "${project}-logs-${postfix}"
+
+##  WORK IN PROGRESS
+##  
+##  # Private endpoints for SQL and storage
+##  blobstoreid=$(az resource show --resource-group "${prefix}-${project}-${postfix}" --resource-type Microsoft.Storage/storageAccounts --name "${project}source${postfix}" --query id --output tsv)
+##  az network private-link-resource list --id ${blobstoreid}
+##  echo "Resource id for blob is ${blobstoreid}"
+##  az network private-endpoint create --name sourceStoreEndpoint --resource-group "${prefix}-${project}-${postfix}" --vnet-name  "${project}-vnet-${postfix}" --subnet DataServicesSubnet --private-connection-resource-id ${blobstoreid} --connection-name sourceStoreConnection
+##  
+##  sqlsrvid=$(az resource show --resource-group "${prefix}-${project}-${postfix}" --resource-type Microsoft.Sql/servers --name "${project}-dbsrv-${postfix}" --query id --output tsv)
+##  az network private-link-resource list --id ${sqlsrvid}
+##  echo "Resource id for SQL Server is ${sqlsrvid}"
+##  az network private-endpoint create --name dbEndpoint --resource-group "${prefix}-${project}-${postfix}" --vnet-name "${project}-vnet-${postfix}" --subnet DataServicesSubnet --private-connection-resource-id ${sqlsrvid} --connection-name dbConnection
+##  
+##  # Github issue: https://github.com/Azure/azure-cli/issues/15896
+##  az monitor diagnostic-settings create --resource-group "${prefix}-${project}-${postfix}" --name SendToLogAnalytics --resource "${project}-db-${postfix}" --resource-type Microsoft.Sql/servers/databases --logs '[{"category":"SQLInsights","Enabled":true},{"category":"AutomaticTuning","Enabled":true},{"category":"QueryStoreRuntimeStatistics","Enabled":true},{"category":"QueryStoreWaitStatistics","Enabled":true},{"category":"Errors","Enabled":true},{"category":"DatabaseWaitStatistics","Enabled":true},{"category":"Timeouts","Enabled":true},{"category":"Blocks","Enabled":true},{"category":"Deadlocks","Enabled":true}]' --metrics '[{"category":"Basic","Enabled":true},{"category":"InstanceAndAppAdvanced","Enabled":true},{"category":"WorkloadManagement","Enabled":true}]' --workspace "${project}-logs-${postfix}"

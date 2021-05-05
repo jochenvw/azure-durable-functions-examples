@@ -1,0 +1,1 @@
+[![Build Status](https://dev.azure.com/jvwdemo/file-transformer-demo/_apis/build/status/jochenvw.file-transformer?branchName=main)](https://dev.azure.com/jvwdemo/file-transformer-demo/_build/latest?definitionId=68&branchName=main)

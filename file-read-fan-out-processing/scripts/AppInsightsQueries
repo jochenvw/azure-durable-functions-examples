@@ -1,0 +1,6 @@
+// Shows how transformation run is progressing
+customMetrics
+| where timestamp > ago(15m)
+| where name == "BatchesCreated" or name == "LinesBatched" or name == "CSVToFormatAConversions" or name == "FormatAToFormatBConversions" or name == "DBWrites"
+| summarize totalCount=sum(valueSum) by bin(timestamp, 1m), name
+| render columnchart
