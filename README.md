@@ -6,7 +6,7 @@ Repository aimed at collecting some more advanced durable function scenarios.
 
 Azure Functions are typically part of a larger systems design. Good practice is to review the design of the overall solution using the 'Well-Architected framework', as described here: [https://docs.microsoft.com/en-us/azure/architecture/framework/](https://docs.microsoft.com/en-us/azure/architecture/framework/).
 
-Input for the solution design, specifically looking at Durable Functions, can be found here: [WAF.md](WAF.md).
+Input for the solution design, specifically looking at Durable Functions, can be found here: [WAF.md](_docs/WAF.md).
 
 ## Examples
 

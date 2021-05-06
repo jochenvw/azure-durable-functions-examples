@@ -1,0 +1,2 @@
+az group create --name durable-function-examples --location westeurope 
+az deployment group create -f ./main.bicep -g durable-function-examples
