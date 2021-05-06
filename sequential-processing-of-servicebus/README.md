@@ -4,7 +4,7 @@
 In order to achieve this: 
 - Ensure the Service Bus queue is configured with sessions
 - Poll the orchestration from the trigger function until the orchestration finishes
-- Please keep the [following](## Things to note) in mind
+- Please keep the [following](#Things-to-note) in mind
 
 [link to relevant code](https://github.com/jochenvw/azure-durable-functions-examples/blob/ffb6162b27b3c3de0223fe00206224e152446107/sequential-processing-of-servicebus/src/servicebus-processor-func/servicebus_processor.cs#L54-L96)
 
