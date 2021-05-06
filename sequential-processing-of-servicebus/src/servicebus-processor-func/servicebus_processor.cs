@@ -12,22 +12,34 @@ namespace servicebus_processor_func
         private static readonly int PollingInterval =
             Convert.ToInt32(Environment.GetEnvironmentVariable("OrchestrationStatePollingInterval"));
 
-        private static readonly bool InjectErrors = Convert.ToBoolean(Environment.GetEnvironmentVariable("InjectRandomErrors"));
+        private static readonly bool InjectErrors = 
+            Convert.ToBoolean(Environment.GetEnvironmentVariable("InjectRandomErrors"));
 
         private static readonly int TaskExecutionDuration =
             Convert.ToInt32(Environment.GetEnvironmentVariable("TaskExecutionDurationInMs"));
 
+        /// <summary>
+        /// Runs the orchestration - in this particular case a very simple one:
+        /// - A simulated activity on the message called 'HandleMessage'
+        /// - Queueing of the result on a Service Bus queue
+        /// </summary>
         [FunctionName("servicebus_processor")]
         public static async Task RunOrchestrator(
             [OrchestrationTrigger] IDurableOrchestrationContext context, ILogger log)
         {
             var msg = context.GetInput<string>();
             log.LogInformation($"Processing message {msg} ...");
+
             await context.CallActivityAsync("HandleMessage", msg);
             await context.CallActivityAsync("QueueMessage", msg);
+
             log.LogInformation($"Processing message {msg} ... done!");
         }
 
+        /// <summary>
+        /// Queues a message on an Azure Service Bus queue
+        /// </summary>
+        /// <param name="msg">Message that will wrapped and used as message body</param>
         [FunctionName("QueueMessage")]
         public static async Task QueueMessage([ActivityTrigger] string msg, ILogger log)
         {
@@ -37,6 +49,12 @@ namespace servicebus_processor_func
             await sender.SendMessageAsync(message);
         }
 
+        /// <summary>
+        /// Simulation of a process that 'handles' the message. Could be transform its content, perform API calls, store in a database.
+        /// In order to simulate a real-world scenario, two things to notice:
+        /// - The execution duration can be configured in appsettings.json and on top of that will have a random wait time
+        /// - Fault injection can be configured in appsettings.json and will then occur in 20% of the time
+        /// </summary>
         [FunctionName("HandleMessage")]
         public static async Task HandleMessage([ActivityTrigger] string msg, ILogger log)
         {
@@ -51,6 +69,16 @@ namespace servicebus_processor_func
             await Task.Delay(TaskExecutionDuration + new Random().Next(100, 1000));
         }
 
+        /// <summary>
+        /// Entry point of the Durable functions. Starts the orchestration function 'RunOrchestrator' async and returns.
+        ///
+        /// This function binds to an Azure Service Bus and since we're trying to achieve that the next message
+        /// is read from the service bus ONLY if the previous message has been fully handled by the orchestration,
+        /// this function is kept alive until the orchestration is done.
+        ///
+        /// See README.md for more details
+        /// </summary>
+        /// <param name="msg">Incoming message from service bus</param>
         [FunctionName("servicebus_processor_HttpStart")]
         public static async Task Run(
             [ServiceBusTrigger("%ServiceBusQueueToListenTo%", Connection = "ServiceBusConnectionIn", IsSessionsEnabled = true)] string msg,

@@ -9,6 +9,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "servicebus-logger", "servic
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "servicebus-processor-func", "servicebus-processor-func\servicebus-processor-func.csproj", "{9B754DA5-5C99-41C9-B048-403AA1D9F6EA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Utilities", "Utilities", "{6342B511-F8B4-4B76-8EAB-21D311A36975}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,6 +32,10 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{EC1AFCD4-92AE-464B-98D8-544F96817456} = {6342B511-F8B4-4B76-8EAB-21D311A36975}
+		{A717B257-A80D-4DA1-A107-7E6230787C44} = {6342B511-F8B4-4B76-8EAB-21D311A36975}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {CF4ECCB4-FF56-4DB4-A9BB-8BA922E6A3B6}
