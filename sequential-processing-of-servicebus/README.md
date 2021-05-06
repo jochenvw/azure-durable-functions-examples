@@ -1,7 +1,10 @@
 # Sequential handling of Service Bus Messages with Azure Durable Functions
 
 ## TL;DR
-Ensure the Service Bus queue is configured with sessions, and keep polling the orchestration from the run function until the orchestration finishes. 
+In order to achieve this: 
+- Ensure the Service Bus queue is configured with sessions
+- Poll the orchestration from the trigger function until the orchestration finishes
+- Please keep the [following](## Things to note) in mind
 
 [link to relevant code](https://github.com/jochenvw/azure-durable-functions-examples/blob/ffb6162b27b3c3de0223fe00206224e152446107/sequential-processing-of-servicebus/src/servicebus-processor-func/servicebus_processor.cs#L54-L96)
 
@@ -115,7 +118,8 @@ So a message will be offered multiple times potentially, until the orchestration
 
 The approach used in this example reads a message from the queue and keeps the trigger function alive until the orchestration is finishes. It's done by polling the `IDurableOrchestrationClient` for the status of the orchestration and waiting until it's in the `OrchestrationRuntimeStatus.Completed` state. Then the trigger function finishes, `autoCompleteMessages` will 'complete()' the message and only then a new trigger function is called.
 
-**Please note:** The following:
+## Things to note
+Please keep in mind the following:
 - This means keeping the trigger function alive a bit longer than it's intended probably. So running multi-minute orchestrations with this pattern is probably a bad idea.
 - It also means that if the orchestration function finishes, there can be a bit of time lost until the next poll from the trigger finds it in `OrchestrationRuntimeStatus.Completed` state. Of course, one can lower the polling interval but this comes at a trade of where the storage account is hit more.
 
