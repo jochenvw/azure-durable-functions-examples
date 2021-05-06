@@ -12,6 +12,9 @@ Input for the solution design, specifically looking at Durable Functions, can be
 
 - **Sequential handling of service bus messages** - not as straight forward as you may think - [link](https://github.com/jochenvw/azure-durable-functions-examples/tree/main/sequential-processing-of-servicebus)
 
+- **Parallel HTTP calls** - orchestration that makes 500,000 HTTP calls/minute on an elastic plan - [link](https://github.com/jochenvw/azure-durable-functions-examples/tree/main/parallel-http-calls)
+
+- **Reading input with many lines and fanning out** - TODO - [link](https://github.com/jochenvw/azure-durable-functions-examples/tree/main/file-read-fan-out-processing)
 
 
 ## Reference material
